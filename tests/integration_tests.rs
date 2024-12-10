@@ -22,10 +22,23 @@ async fn setup_test_db() -> PgPool {
         .await
         .expect("Failed to create test database pool");
 
-    // Create tables
+    // Create tables if they do not already exist
     let queries = vec![
         r#"
-        CREATE TABLE leaderboard (
+        CREATE TABLE IF NOT EXISTS member (
+            id SERIAL PRIMARY KEY,
+            rollno VARCHAR(255) NOT NULL,
+            name VARCHAR(255) NOT NULL,
+            hostel VARCHAR(255) NOT NULL,
+            email VARCHAR(255) NOT NULL UNIQUE,
+            sex VARCHAR(10) NOT NULL,
+            year INT NOT NULL,
+            macaddress VARCHAR(17) NOT NULL,
+            discord_id VARCHAR(255),
+            group_id INT NOT NULL
+        )"#,
+        r#"
+        CREATE TABLE IF NOT EXISTS leaderboard (
             id SERIAL PRIMARY KEY,
             member_id INT UNIQUE NOT NULL,
             leetcode_score INT,
@@ -35,7 +48,7 @@ async fn setup_test_db() -> PgPool {
             FOREIGN KEY (member_id) REFERENCES member(id)
         )"#,
         r#"
-        CREATE TABLE leetcode_stats (
+        CREATE TABLE IF NOT EXISTS leetcode_stats (
             id SERIAL PRIMARY KEY,
             member_id INT UNIQUE NOT NULL,
             leetcode_username VARCHAR(255) NOT NULL,
@@ -49,7 +62,7 @@ async fn setup_test_db() -> PgPool {
             FOREIGN KEY (member_id) REFERENCES member(id)
         )"#,
         r#"
-        CREATE TABLE codeforces_stats (
+        CREATE TABLE IF NOT EXISTS codeforces_stats (
             id SERIAL PRIMARY KEY,
             member_id INT UNIQUE NOT NULL,
             codeforces_handle VARCHAR(255) NOT NULL,
@@ -70,11 +83,41 @@ async fn setup_test_db() -> PgPool {
 }
 
 // Helper function to clean up test data
+
 async fn cleanup_test_data(pool: &PgPool) {
-    sqlx::query("TRUNCATE TABLE leaderboard, leetcode_stats, codeforces_stats, member RESTART IDENTITY CASCADE;")
+    let cleanup_query = r#"
+        DO $$
+        DECLARE
+            seq RECORD;
+        BEGIN
+            -- Truncate all relevant tables
+            TRUNCATE TABLE leaderboard, leetcode_stats, codeforces_stats, member RESTART IDENTITY CASCADE;
+
+            -- Reset sequences
+            FOR seq IN
+                SELECT c.relname
+                FROM pg_class c
+                JOIN pg_namespace n ON n.oid = c.relnamespace
+                WHERE c.relkind = 'S' AND n.nspname = 'public'
+            LOOP
+                EXECUTE 'ALTER SEQUENCE ' || seq.relname || ' RESTART WITH 1';
+            END LOOP;
+        END $$;
+        "#;
+
+    sqlx::query(cleanup_query)
         .execute(pool)
         .await
-        .expect("Failed to clean up test data");
+        .expect("Failed to clean up and reset database state");
+    // let _ = sqlx::query("TRUNCATE TABLE leaderboard, leetcode_stats, codeforces_stats, member RESTART IDENTITY CASCADE;")
+    //     .execute(pool)
+    //     .await
+    //     .expect("Failed to clean up test data");
+
+    // let _ = sqlx::query("SELECT setval('member_id_seq', (SELECT MAX(id) FROM member), false);")
+    //     .execute(pool)
+    //     .await
+    //     .expect("Failed to reset member_id_seq");
 }
 
 //test
@@ -95,6 +138,7 @@ async fn test_insert_members_and_update_stats() {
             2021,
             "00:11:22:33:44:55",
             Some("john_discord"),
+            1,
             "swayam-agrahari",
             "tourist",
         ),
@@ -107,6 +151,7 @@ async fn test_insert_members_and_update_stats() {
             2021,
             "66:77:88:99:AA:BB",
             Some("jane_discord"),
+            2,
             "rihaan1810",
             "tourist",
         ),
@@ -118,8 +163,8 @@ async fn test_insert_members_and_update_stats() {
     for member in &members {
         // Insert Member
         let member_result = sqlx::query_as::<_, Member>(
-            "INSERT INTO Member (rollno, name, hostel, email, sex, year, macaddress, discord_id)
-                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+            "INSERT INTO member (rollno, name, hostel, email, sex, year, macaddress, discord_id, group_id)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
                  RETURNING *",
         )
         .bind(&member.0)
@@ -130,6 +175,7 @@ async fn test_insert_members_and_update_stats() {
         .bind(member.5)
         .bind(&member.6)
         .bind(&member.7)
+        .bind(&member.8)
         .fetch_one(&pool)
         .await
         .expect("Failed to insert member");
@@ -140,7 +186,7 @@ async fn test_insert_members_and_update_stats() {
                  VALUES ($1, $2, 0,0,0,0,0,0,0)",
             )
             .bind(member_result.id)
-            .bind(&member.8)
+            .bind(&member.9)
             .execute(&pool)
             .await
             .expect("Failed to insert LeetCode stats");
@@ -151,7 +197,7 @@ async fn test_insert_members_and_update_stats() {
                  VALUES ($1, $2, 0,0,0)",
             )
             .bind(member_result.id)
-            .bind(&member.9)
+            .bind(&member.10)
             .execute(&pool)
             .await
             .expect("Failed to insert Codeforces stats");
@@ -160,7 +206,7 @@ async fn test_insert_members_and_update_stats() {
     }
 
     // Test LeetCode stats fetching
-    for (member_id, leetcode_username) in inserted_members.iter().zip(members.iter().map(|m| m.8)) {
+    for (member_id, leetcode_username) in inserted_members.iter().zip(members.iter().map(|m| m.9)) {
         match fetch_leetcode_stats(Arc::new(pool.clone()), *member_id, leetcode_username).await {
             Ok(_) => println!(
                 "Successfully fetched LeetCode stats for member ID: {}",
@@ -220,7 +266,6 @@ async fn test_insert_members_and_update_stats() {
         );
     }
 
-    // Clean up
     cleanup_test_data(&pool).await;
 }
 
@@ -229,11 +274,7 @@ async fn test_insert_members_and_update_stats() {
 async fn test_database_connection() {
     let pool = setup_test_db().await;
     let database_url = get_database_url();
-
-    // Print the URL to verify (optional, for debugging purposes)
     println!("Database URL: {}", database_url);
-
-    // Basic database connectivity test
     let result = sqlx::query("SELECT 1").fetch_one(&pool).await;
 
     assert!(result.is_ok(), "Database connection and query should work");
