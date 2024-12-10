@@ -19,9 +19,11 @@ jobs:
 
       - name: Install Rust and Cargo
         run: |
-          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -y
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
           source $HOME/.cargo/env
-          cargo test 
+      
+      - name: Run Tests
+        run: cargo test
 
       - uses: shuttle-hq/deploy-action@main
         with:
