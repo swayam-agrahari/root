@@ -23,22 +23,9 @@ async fn setup_test_db() -> PgPool {
         .expect("Failed to create test database pool");
 
     // Create tables
-    sqlx::query(
+    let queries = vec![
         r#"
-        CREATE TABLE IF NOT EXISTS member (
-            id SERIAL PRIMARY KEY,
-            rollno VARCHAR(20) NOT NULL,
-            name VARCHAR(255) NOT NULL,
-            hostel VARCHAR(100) NOT NULL,
-            email VARCHAR(255) NOT NULL,
-            sex VARCHAR(10) NOT NULL,
-            year INT NOT NULL,
-            macaddress VARCHAR(50) NOT NULL,
-            discord_id VARCHAR(255),
-            group_id INT
-        );
-
-        CREATE TABLE IF NOT EXISTS leaderboard (
+        CREATE TABLE leaderboard (
             id SERIAL PRIMARY KEY,
             member_id INT UNIQUE NOT NULL,
             leetcode_score INT,
@@ -46,11 +33,11 @@ async fn setup_test_db() -> PgPool {
             unified_score INT NOT NULL,
             last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY (member_id) REFERENCES member(id)
-        );
-
-        CREATE TABLE IF NOT EXISTS leetcode_stats (
+        )"#,
+        r#"
+        CREATE TABLE leetcode_stats (
             id SERIAL PRIMARY KEY,
-            member_id INT NOT NULL UNIQUE,
+            member_id INT UNIQUE NOT NULL,
             leetcode_username VARCHAR(255) NOT NULL,
             problems_solved INT NOT NULL,
             easy_solved INT NOT NULL,
@@ -60,22 +47,25 @@ async fn setup_test_db() -> PgPool {
             best_rank INT NOT NULL,
             total_contests INT NOT NULL,
             FOREIGN KEY (member_id) REFERENCES member(id)
-        );
-
-        CREATE TABLE IF NOT EXISTS codeforces_stats (
+        )"#,
+        r#"
+        CREATE TABLE codeforces_stats (
             id SERIAL PRIMARY KEY,
-            member_id INT NOT NULL UNIQUE,
+            member_id INT UNIQUE NOT NULL,
             codeforces_handle VARCHAR(255) NOT NULL,
             codeforces_rating INT NOT NULL,
             max_rating INT NOT NULL,
             contests_participated INT NOT NULL,
             FOREIGN KEY (member_id) REFERENCES member(id)
-        );
-        "#,
-    )
-    .execute(&pool)
-    .await
-    .expect("Failed to create tables in test database");
+        )"#,
+    ];
+
+    for query in queries {
+        sqlx::query(query)
+            .execute(&pool)
+            .await
+            .expect("Failed to execute query");
+    }
     pool
 }
 
